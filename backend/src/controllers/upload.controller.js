@@ -3,8 +3,10 @@ import {
   deleteChunkDirectory,
   getMissingChunks,
   getUpload,
+  isUploadComplete,
   markChunkUploaded,
   markUploadCompleted,
+  mergeChunks,
   saveChunk,
 } from "../services/upload.service.js";
 import { CHUNK_SIZE } from "../utils/file.utils.js";
@@ -42,7 +44,13 @@ export const initUpload = async (req, res) => {
 export const uploadChunk = async (req, res) => {
   try {
     const { uploadID } = req.params;
-    const { chunkIndex } = req.body;
+    const chunkIndex = Number(req.headers["x-chunk-index"]);
+
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+      return res.status(400).json({
+        message: "Invalid chunk index",
+      });
+    }
 
     if (!uploadID) {
       return res.status(400).json({ message: "uploadID is required!" });
