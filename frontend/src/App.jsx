@@ -22,13 +22,16 @@ const App = () => {
             <p className="eyebrow">RESUMABLE FILE UPLOADER</p>
 
             <h1>
-              Upload Large Files
-              <span> Without starting over.</span>
+              {/* Upload Large Files
+              <span> Without starting over.</span> */}
+              Upload Large Files Reliably.
             </h1>
 
             <p className="subtitle">
-              Chunked uploads with resume support, real-time progress, retry
-              handling and upload speed tracking.
+              {/* Chunked uploads with resume support, real-time progress, retry
+              handling and upload speed tracking. */}
+              Chunked uploads with real-time progress, upload speed tracking,
+              automatic retry handling and chunk-level failure recovery.
             </p>
           </div>
         </header>
