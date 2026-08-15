@@ -2,27 +2,98 @@ import { useState } from "react";
 
 import {
   completeUpload,
+  getUploadStatus,
   initializeUpload,
   uploadChunk,
 } from "../services/upload.api";
 
 import { createChunks } from "../utils/upload.utils";
 import { retry } from "../utils/retry.utils";
+import {
+  findStoredUpload,
+  removeStoredUpload,
+  saveStoredUpload,
+} from "../utils/upload.storage";
 
 const speedTrackers = {};
 
 export const useFileUpload = () => {
   const [uploads, setUploads] = useState({});
 
-  const startUpload = async (file) => {
-    try {
-      // 1. Initialize upload
-      const upload = await initializeUpload({
-        fileName: file.name,
-        fileSize: file.size,
-      });
+  const startUpload = async (file, existingUploadID) => {
+    const storedUpload = findStoredUpload({
+      fileName: file.name,
+      fileSize: file.size,
+    });
 
-      // 2. Create file chunks
+    const resumeUploadID = existingUploadID ?? storedUpload?.uploadID ?? null;
+
+    try {
+      // 1. Get existing upload or initialize a new one
+      let upload;
+      let uploadedChunks = [];
+
+      if (resumeUploadID) {
+        try {
+          const status = await getUploadStatus(resumeUploadID);
+
+          // Upload already completed
+          if (status.status === "completed") {
+            console.log("Upload already completed:", status);
+
+            removeStoredUpload(status.uploadID);
+
+            return;
+          }
+
+          // Upload still exists → resume
+          upload = {
+            uploadID: status.uploadID,
+            totalChunks: status.totalChunks,
+          };
+
+          uploadedChunks = status.uploadedChunks ?? [];
+
+          console.log("Resuming upload:", status);
+        } catch (error) {
+          console.log("Stored upload no longer exists. Starting a new upload.");
+
+          // Remove stale localStorage entry
+          removeStoredUpload(resumeUploadID);
+
+          // Create a completely new upload
+          upload = await initializeUpload({
+            fileName: file.name,
+            fileSize: file.size,
+          });
+
+          saveStoredUpload({
+            uploadID: upload.uploadID,
+            fileName: file.name,
+            fileSize: file.size,
+            totalChunks: upload.totalChunks,
+          });
+
+          uploadedChunks = [];
+        }
+      } else {
+        // Start a completely new upload
+        upload = await initializeUpload({
+          fileName: file.name,
+          fileSize: file.size,
+        });
+
+        saveStoredUpload({
+          uploadID: upload.uploadID,
+          fileName: file.name,
+          fileSize: file.size,
+          totalChunks: upload.totalChunks,
+        });
+
+        console.log("Upload started:", upload);
+      }
+
+      // 2. Create the chunks
       const chunks = createChunks(file);
 
       // 3. Initialize speed tracker
@@ -59,6 +130,25 @@ export const useFileUpload = () => {
 
       // 6. Upload every chunk
       for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+        // Skip chunks that are already on the server
+        if (uploadedChunks.includes(chunkIndex)) {
+          confirmedBytes += chunks[chunkIndex].size;
+
+          const progress = (confirmedBytes / file.size) * 100;
+          setUploads((currrent) => ({
+            ...current,
+            [file.name]: {
+              ...currrent[file.name],
+
+              uploadedBytes: confirmedBytes,
+              progress,
+              status: "uploading",
+            },
+          }));
+
+          continue;
+        }
+
         // Reset progress tracking for this chunk attempt
         let previousChunkBytes = 0;
 
@@ -181,9 +271,12 @@ export const useFileUpload = () => {
       // 9. Tell backend to verify and merge
       const result = await completeUpload(upload.uploadID);
 
+      // 10. Remove upload from localStorage
+      removeStoredUpload(upload.uploadID);
+
       console.log("Upload completed:", result);
 
-      // 10. Mark upload as completed
+      // 11. Mark upload as completed
       setUploads((current) => ({
         ...current,
 
@@ -204,7 +297,7 @@ export const useFileUpload = () => {
         },
       }));
 
-      // 11. Clean up speed tracker
+      // 12. Clean up speed tracker
       delete speedTrackers[file.name];
     } catch (error) {
       console.error("Upload failed:", error);

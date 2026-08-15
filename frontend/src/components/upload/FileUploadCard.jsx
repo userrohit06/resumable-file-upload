@@ -119,7 +119,7 @@ const FileUploadCard = ({ file, upload, onStart }) => {
       {upload?.status === "failed" && (
         <button
           className="start-upload-button retry-button"
-          onClick={() => onStart(file)}
+          onClick={() => onStart(file, upload.uploadID)}
         >
           Retry upload
         </button>

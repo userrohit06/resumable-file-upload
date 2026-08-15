@@ -11,7 +11,7 @@ const uploadRoutes = Router();
 
 uploadRoutes.post("/init", initUpload);
 uploadRoutes.post("/:uploadID/chunk", upload.single("chunk"), uploadChunk);
-uploadRoutes.post("/:uploadID/status", getUploadStatus);
+uploadRoutes.get("/:uploadID/status", getUploadStatus);
 uploadRoutes.post("/:uploadID/complete", completeUpload);
 
 export default uploadRoutes;

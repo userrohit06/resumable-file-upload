@@ -34,3 +34,8 @@ export const completeUpload = async (uploadID) => {
   const response = await api.post(`/${uploadID}/complete`);
   return response.data;
 };
+
+export const getUploadStatus = async (uploadID) => {
+  const response = await api.get(`/${uploadID}/status`);
+  return response.data;
+};
