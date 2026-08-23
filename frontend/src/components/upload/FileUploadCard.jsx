@@ -1,4 +1,5 @@
 import React from "react";
+import { UPLOAD_STATUS } from "../../constants/uploadStatus";
 
 const FileUploadCard = ({ file, upload, onStart }) => {
   const sizeInMB = (file.size / (1024 * 1024)).toFixed(2);
@@ -62,16 +63,18 @@ const FileUploadCard = ({ file, upload, onStart }) => {
 
         <span
           className={`file-status ${
-            upload?.status === "completed"
+            upload?.status === UPLOAD_STATUS.COMPLETED
               ? "file-status-success"
-              : upload?.status === "retrying"
+              : upload?.status === UPLOAD_STATUS.RETRYING
                 ? "file-status-retrying"
                 : ""
           }`}
         >
-          {upload?.status === "retrying"
+          {upload?.status === UPLOAD_STATUS.RETRYING
             ? `Retrying chunk ${upload.retry.chunkIndex + 1}...`
-            : (upload?.status ?? "Waiting")}
+            : upload?.status === UPLOAD_STATUS.PENDING
+              ? "Waiting in queue..."
+              : (upload?.status ?? UPLOAD_STATUS.WAITING)}
         </span>
       </div>
 
@@ -90,7 +93,7 @@ const FileUploadCard = ({ file, upload, onStart }) => {
           </span>
         </div>
 
-        {upload?.status === "uploading" && (
+        {upload?.status === UPLOAD_STATUS.UPLOADING && (
           <div className="upload-stats">
             <span>↑ {formatSpeed(speed)}</span>
             <span>{formatETA(eta)} left</span>
@@ -98,25 +101,25 @@ const FileUploadCard = ({ file, upload, onStart }) => {
         )}
       </div>
 
-      {!upload && (
-        <button className="start-upload-button" onClick={() => onStart(file)}>
-          Start upload
+      {upload?.status === UPLOAD_STATUS.PENDING && (
+        <button className="start-upload-button" disabled>
+          Waiting...
         </button>
       )}
 
-      {upload?.status === "uploading" && (
+      {upload?.status === UPLOAD_STATUS.UPLOADING && (
         <button className="start-upload-button" disabled>
           Uploading...
         </button>
       )}
 
-      {upload?.status === "retrying" && (
+      {upload?.status === UPLOAD_STATUS.RETRYING && (
         <button className="start-upload-button" disabled>
           Retrying...
         </button>
       )}
 
-      {upload?.status === "failed" && (
+      {upload?.status === UPLOAD_STATUS.FAILED && (
         <button
           className="start-upload-button retry-button"
           onClick={() => onStart(file, upload.uploadID)}

@@ -1,9 +1,8 @@
 import React, { useState } from "react";
 import FileDropzone from "./components/upload/FileDropzone";
 import FileUploadCard from "./components/upload/FileUploadCard";
-import { initializeUpload, uploadChunk } from "./services/upload.api";
-import { createChunks } from "./utils/upload.utils";
 import { useFileUpload } from "./hooks/useFileUpload";
+import UploadActivity from "./components/upload/UploadActivity";
 
 const App = () => {
   const { uploads, startUpload } = useFileUpload();
@@ -11,7 +10,20 @@ const App = () => {
   const [files, setFiles] = useState([]);
 
   const handleFilesSelected = (selectedFiles) => {
-    setFiles(selectedFiles);
+    const existingKeys = new Set(
+      files.map((file) => `${file.name}-${file.size}-${file.lastModified}`),
+    );
+
+    const newFiles = selectedFiles.filter((file) => {
+      const key = `${file.name}-${file.size}-${file.lastModified}`;
+      return !existingKeys.has(key);
+    });
+
+    if (newFiles.length === 0) return;
+
+    setFiles((currentFiles) => [...currentFiles, ...newFiles]);
+
+    newFiles.forEach((file) => startUpload(file));
   };
 
   return (
@@ -53,6 +65,8 @@ const App = () => {
           </section>
         )}
       </main>
+
+      <UploadActivity uploads={uploads} />
     </div>
   );
 };
