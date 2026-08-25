@@ -3,28 +3,25 @@ import fs from "fs/promises";
 import path from "path";
 
 import { getChunkDirectory } from "../utils/file.utils.js";
+import { Upload } from "../models/Upload.js";
 
-const uploads = new Map();
-
-export const createUpload = ({ fileName, fileSize, totalChunks }) => {
+export const createUpload = async ({ fileName, fileSize, totalChunks }) => {
   const uploadID = crypto.randomUUID();
 
-  const upload = {
+  const upload = await Upload.create({
     uploadID,
     fileName,
     fileSize,
     totalChunks,
     uploadedChunks: [],
-    status: "uploading",
-  };
-
-  uploads.set(uploadID, upload);
+    status: "pending",
+  });
 
   return upload;
 };
 
 export const saveChunk = async ({ uploadID, chunkIndex, chunk }) => {
-  const upload = uploads.get(uploadID);
+  const upload = await Upload.findOne({ uploadID });
 
   if (!upload) {
     throw new Error("Upload session not found");
@@ -36,7 +33,9 @@ export const saveChunk = async ({ uploadID, chunkIndex, chunk }) => {
 
   const chunkDirectory = getChunkDirectory(uploadID);
 
-  await fs.mkdir(chunkDirectory, { recursive: true });
+  await fs.mkdir(chunkDirectory, {
+    recursive: true,
+  });
 
   const chunkPath = path.join(chunkDirectory, String(chunkIndex));
 
@@ -45,6 +44,9 @@ export const saveChunk = async ({ uploadID, chunkIndex, chunk }) => {
     .then(() => true)
     .catch(() => false);
 
+  // Idempotency:
+  // If the same chunk is sent again,
+  // don't overwrite or corrupt it.
   if (chunkExists) {
     return {
       chunkIndex,
@@ -62,70 +64,59 @@ export const saveChunk = async ({ uploadID, chunkIndex, chunk }) => {
   };
 };
 
-export const markChunkUploaded = (uploadID, chunkIndex) => {
-  const upload = uploads.get(uploadID);
+export const markChunkUploaded = async (uploadID, chunkIndex) => {
+  const upload = await Upload.findOneAndUpdate(
+    {
+      uploadID,
+    },
+    {
+      $addToSet: {
+        uploadedChunks: chunkIndex,
+      },
 
-  if (!upload.uploadedChunks.includes(chunkIndex)) {
-    upload.uploadedChunks.push(chunkIndex);
-  }
-
-  return upload;
-};
-
-export const getUpload = (uploadID) => {
-  return uploads.get(uploadID);
-};
-
-export const isUploadComplete = (uploadID) => {
-  const upload = uploads.get(uploadID);
-
-  if (!upload) {
-    throw new Error("Upload session not found!");
-  }
-
-  return upload.uploadedChunks.length === upload.totalChunks;
-};
-
-export const mergeChunks = async (uploadID) => {
-  const upload = uploads.get(uploadID);
+      $set: {
+        status: "uploading",
+      },
+    },
+    {
+      new: true,
+    },
+  );
 
   if (!upload) {
     throw new Error("Upload session not found");
   }
 
-  const chunkDirectory = getChunkDirectory(uploadID);
-
-  const uploadDirectory = path.join(process.cwd(), "storage", "uploads");
-
-  await fs.mkdir(uploadDirectory, { recursive: true });
-
-  const finalFilePath = path.join(uploadDirectory, upload.fileName);
-
-  const finalFileHandle = await fs.open(finalFilePath, "w");
-
-  try {
-    for (let chunkIndex = 0; chunkIndex < upload.totalChunks; chunkIndex++) {
-      const chunkPath = path.join(chunkDirectory, String(chunkIndex));
-
-      const chunk = await fs.readFile(chunkPath);
-
-      await finalFileHandle.write(chunk);
-    }
-  } finally {
-    await finalFileHandle.close();
-  }
-
-  return {
-    fileName: upload.fileName,
-    filePath: finalFilePath,
-  };
+  return upload;
 };
 
-export const getMissingChunks = (uploadID) => {
-  const upload = uploads.get(uploadID);
+export const getUpload = async (uploadID) => {
+  const upload = await Upload.findOne({
+    uploadID,
+  });
+
+  return upload;
+};
+
+export const isUploadComplete = async (uploadID) => {
+  const upload = await Upload.findOne({
+    uploadID,
+  });
 
   if (!upload) {
-    throw new Error("Upload session not found!");
+    throw new Error("Upload session not found");
+  }
+
+  return upload.uploadedChunks.length === upload.totalChunks;
+};
+
+export const getMissingChunks = async (uploadID) => {
+  const upload = await Upload.findOne({
+    uploadID,
+  });
+
+  if (!upload) {
+    throw new Error("Upload session not found");
   }
 
   const missingChunks = [];
@@ -139,6 +130,42 @@ export const getMissingChunks = (uploadID) => {
   return missingChunks;
 };
 
+export const mergeChunks = async (uploadID) => {
+  const upload = await Upload.findOne({
+    uploadID,
+  });
+
+  if (!upload) {
+    throw new Error("Upload session not found");
+  }
+
+  const chunkDirectory = getChunkDirectory(uploadID);
+  const uploadDirectory = path.join(process.cwd(), "storage", "uploads");
+
+  await fs.mkdir(uploadDirectory, {
+    recursive: true,
+  });
+
+  const finalFilePath = path.join(uploadDirectory, upload.fileName);
+  const finalFileHandle = await fs.open(finalFilePath, "w");
+
+  try {
+    for (let chunkIndex = 0; chunkIndex < upload.totalChunks; chunkIndex++) {
+      const chunkPath = path.join(chunkDirectory, String(chunkIndex));
+
+      const chunk = await fs.readFile(chunkPath);
+      await finalFileHandle.write(chunk);
+    }
+  } finally {
+    await finalFileHandle.close();
+  }
+
+  return {
+    fileName: upload.fileName,
+    filePath: finalFilePath,
+  };
+};
+
 export const deleteChunkDirectory = async (uploadID) => {
   const chunkDirectory = getChunkDirectory(uploadID);
 
@@ -148,14 +175,24 @@ export const deleteChunkDirectory = async (uploadID) => {
   });
 };
 
-export const markUploadCompleted = (uploadID) => {
-  const upload = uploads.get(uploadID);
+export const markUploadCompleted = async (uploadID) => {
+  const upload = await Upload.findOneAndUpdate(
+    {
+      uploadID,
+    },
+    {
+      $set: {
+        status: "completed",
+      },
+    },
+    {
+      new: true,
+    },
+  );
 
   if (!upload) {
     throw new Error("Upload session not found");
   }
-
-  upload.status = "completed";
 
   return upload;
 };

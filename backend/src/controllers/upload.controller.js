@@ -1,5 +1,4 @@
 import {
-  createUpload,
   deleteChunkDirectory,
   getMissingChunks,
   getUpload,
@@ -10,6 +9,7 @@ import {
   saveChunk,
 } from "../services/upload.service.js";
 import { CHUNK_SIZE } from "../utils/file.utils.js";
+import { Upload } from "../models/Upload.js";
 
 export const initUpload = async (req, res) => {
   try {
@@ -25,13 +25,21 @@ export const initUpload = async (req, res) => {
 
     const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
 
-    const upload = createUpload({
+    const upload = await Upload.create({
       fileName: fileName.trim(),
       fileSize,
       totalChunks,
+      status: "pending",
     });
 
-    res.status(201).json(upload);
+    res.status(201).json({
+      uploadID: upload.uploadID,
+      fileName: upload.fileName,
+      fileSize: upload.fileSize,
+      totalChunks: upload.totalChunks,
+      uploadedChunks: upload.uploadedChunks,
+      status: upload.status,
+    });
   } catch (error) {
     console.error(error);
 
@@ -70,7 +78,7 @@ export const uploadChunk = async (req, res) => {
       chunk: req.file.buffer,
     });
 
-    markChunkUploaded(uploadID, chunkIndex);
+    await markChunkUploaded(uploadID, chunkIndex);
 
     return res.status(200).json({
       message: result.alreadyUploaded
@@ -93,10 +101,10 @@ export const getUploadStatus = async (req, res) => {
       return res.status(400).json({ message: "uploadID is required!" });
     }
 
-    const upload = getUpload(uploadID);
+    const upload = await getUpload(uploadID);
 
     if (!upload) {
-      return res.status(400).json({ message: "Upload session not found!" });
+      return res.status(404).json({ message: "Upload session not found!" });
     }
 
     return res.status(200).json({
@@ -123,7 +131,11 @@ export const completeUpload = async (req, res) => {
       });
     }
 
-    const upload = getUpload(uploadID);
+    const upload = await getUpload(uploadID);
+
+    if (!upload) {
+      return res.status(404).json({ message: "Upload session not found!" });
+    }
 
     if (upload.status === "completed") {
       return res.status(409).json({
@@ -138,10 +150,10 @@ export const completeUpload = async (req, res) => {
       });
     }
 
-    const complete = isUploadComplete(uploadID);
+    const complete = await isUploadComplete(uploadID);
 
     if (!complete) {
-      const missingChunks = getMissingChunks(uploadID);
+      const missingChunks = await getMissingChunks(uploadID);
 
       return res.status(400).json({
         message: "Upload is incomplete",
@@ -156,7 +168,7 @@ export const completeUpload = async (req, res) => {
 
     await deleteChunkDirectory(uploadID);
 
-    markUploadCompleted(uploadID);
+    await markUploadCompleted(uploadID);
 
     return res.status(200).json({
       message: "File uploaded successfully",
