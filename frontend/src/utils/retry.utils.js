@@ -12,6 +12,12 @@ export const retry = async (
     } catch (error) {
       lastError = error;
 
+      // Intentional cancellation
+      // Never retry an aborted request
+      if (error.code === "ERR_CANCELED" || error.name === "CanceledError") {
+        throw error;
+      }
+
       if (attempt === maxRetries) {
         throw lastError;
       }

@@ -14,6 +14,7 @@ export const uploadChunk = async ({
   chunk,
   chunkIndex,
   onUploadProgress,
+  signal,
 }) => {
   const formData = new FormData();
 
@@ -25,6 +26,7 @@ export const uploadChunk = async ({
     },
 
     onUploadProgress,
+    signal,
   });
 
   return response.data;

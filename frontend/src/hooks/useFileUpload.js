@@ -19,16 +19,28 @@ import {
 import { UploadQueue } from "../utils/upload.queue";
 import { UPLOAD_STATUS } from "../constants/uploadStatus";
 
-const speedTrackers = {};
+// ---------------------------------------------------------
+// Global trackers
+// ---------------------------------------------------------
 
-// One shared queue for the whole application.
+const speedTrackers = {};
+const uploadControllers = {};
+
 // Maximum 2 files can upload simultaneously.
 const uploadQueue = new UploadQueue(2);
+
+// ---------------------------------------------------------
+// Hook
+// ---------------------------------------------------------
 
 export const useFileUpload = () => {
   const [uploads, setUploads] = useState({});
 
-  const performUpload = async (file, existingUploadID) => {
+  // -------------------------------------------------------
+  // Perform actual upload
+  // -------------------------------------------------------
+
+  const performUpload = async (file, existingUploadID, controller) => {
     const storedUpload = findStoredUpload({
       fileName: file.name,
       fileSize: file.size,
@@ -37,9 +49,9 @@ export const useFileUpload = () => {
     const resumeUploadID = existingUploadID ?? storedUpload?.uploadID ?? null;
 
     try {
-      // -----------------------------------------------------
-      // 1. Get existing upload or initialize a new one
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 1. Get existing upload or initialize new upload
+      // ---------------------------------------------------
 
       let upload;
       let uploadedChunks = [];
@@ -48,7 +60,10 @@ export const useFileUpload = () => {
         try {
           const status = await getUploadStatus(resumeUploadID);
 
-          // Upload already completed
+          // -----------------------------------------------
+          // Already completed
+          // -----------------------------------------------
+
           if (status.status === UPLOAD_STATUS.COMPLETED) {
             removeStoredUpload(status.uploadID);
 
@@ -59,11 +74,16 @@ export const useFileUpload = () => {
                 ...current[file.name],
 
                 uploadID: status.uploadID,
+
                 progress: 100,
+
                 uploadedBytes: file.size,
+
                 status: UPLOAD_STATUS.COMPLETED,
+
                 speed: 0,
                 eta: 0,
+
                 retry: null,
               },
             }));
@@ -71,22 +91,28 @@ export const useFileUpload = () => {
             return;
           }
 
-          // Upload still exists → resume it
+          // -----------------------------------------------
+          // Existing upload → resume
+          // -----------------------------------------------
+
           upload = {
             uploadID: status.uploadID,
+
             totalChunks: status.totalChunks,
           };
 
           uploadedChunks = status.uploadedChunks ?? [];
         } catch (error) {
+          // -----------------------------------------------
+          // Stored upload is stale/missing
+          // -----------------------------------------------
+
           console.error(
             "Stored upload no longer exists. Starting a new upload.",
           );
 
-          // Remove stale localStorage entry
           removeStoredUpload(resumeUploadID);
 
-          // Create a completely new upload
           upload = await initializeUpload({
             fileName: file.name,
             fileSize: file.size,
@@ -94,15 +120,21 @@ export const useFileUpload = () => {
 
           saveStoredUpload({
             uploadID: upload.uploadID,
+
             fileName: file.name,
+
             fileSize: file.size,
+
             totalChunks: upload.totalChunks,
           });
 
           uploadedChunks = [];
         }
       } else {
-        // Start a completely new upload
+        // -------------------------------------------------
+        // New upload
+        // -------------------------------------------------
+
         upload = await initializeUpload({
           fileName: file.name,
           fileSize: file.size,
@@ -110,30 +142,53 @@ export const useFileUpload = () => {
 
         saveStoredUpload({
           uploadID: upload.uploadID,
+
           fileName: file.name,
+
           fileSize: file.size,
+
           totalChunks: upload.totalChunks,
         });
       }
 
-      // -----------------------------------------------------
-      // 2. Create file chunks
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 2. Create chunks
+      // ---------------------------------------------------
 
       const chunks = createChunks(file);
 
-      // -----------------------------------------------------
-      // 3. Initialize speed tracker
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 3. Calculate already uploaded bytes
+      // ---------------------------------------------------
+
+      let confirmedBytes = 0;
+
+      for (const chunkIndex of uploadedChunks) {
+        if (chunkIndex >= 0 && chunkIndex < chunks.length) {
+          confirmedBytes += chunks[chunkIndex].size;
+        }
+      }
+
+      // ---------------------------------------------------
+      // 4. Initialize rolling speed tracker
+      // ---------------------------------------------------
+
+      const now = performance.now();
 
       speedTrackers[file.name] = {
-        bytes: 0,
-        time: performance.now(),
+        samples: [
+          {
+            bytes: confirmedBytes,
+            time: now,
+          },
+        ],
       };
 
-      // -----------------------------------------------------
-      // 4. Update UI → uploading
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 5. Update UI with recovered progress
+      // ---------------------------------------------------
+
+      const initialProgress = (confirmedBytes / file.size) * 100;
 
       setUploads((current) => ({
         ...current,
@@ -142,57 +197,53 @@ export const useFileUpload = () => {
           ...current[file.name],
 
           file,
+
           uploadID: upload.uploadID,
+
           chunks,
+
           totalChunks: chunks.length,
-          uploadedBytes: 0,
-          progress: 0,
+
+          uploadedBytes: confirmedBytes,
+
+          progress: initialProgress,
+
           speed: 0,
+
           eta: 0,
+
           status: UPLOAD_STATUS.UPLOADING,
+
           retry: null,
+
           error: null,
         },
       }));
 
-      // -----------------------------------------------------
-      // 5. Track successfully confirmed bytes
-      // -----------------------------------------------------
-
-      let confirmedBytes = 0;
-
-      // -----------------------------------------------------
-      // 6. Upload every chunk
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 6. Upload chunks
+      // ---------------------------------------------------
 
       for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-        // ---------------------------------------------------
-        // Skip chunks already uploaded to the backend
-        // ---------------------------------------------------
+        // -----------------------------------------------
+        // User paused the upload
+        // -----------------------------------------------
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        // -----------------------------------------------
+        // Already uploaded → skip
+        // -----------------------------------------------
 
         if (uploadedChunks.includes(chunkIndex)) {
-          confirmedBytes += chunks[chunkIndex].size;
-          const progress = (confirmedBytes / file.size) * 100;
-          setUploads((current) => ({
-            ...current,
-
-            [file.name]: {
-              ...current[file.name],
-
-              uploadedBytes: confirmedBytes,
-              progress,
-              status: UPLOAD_STATUS.UPLOADING,
-            },
-          }));
-
           continue;
         }
 
-        // ---------------------------------------------------
-        // Track current chunk progress
-        // ---------------------------------------------------
-
-        let previousChunkBytes = 0;
+        // -----------------------------------------------
+        // Upload current chunk
+        // -----------------------------------------------
 
         await retry(
           () =>
@@ -203,60 +254,79 @@ export const useFileUpload = () => {
 
               chunkIndex,
 
+              signal: controller.signal,
+
               onUploadProgress: (progressEvent) => {
+                // Don't update state after pause
+                if (controller.signal.aborted) {
+                  return;
+                }
+
                 const currentChunkUploaded = progressEvent.loaded;
 
-                /*
-                 * Bytes uploaded for the current chunk
-                 * during this request.
-                 */
-                previousChunkBytes = currentChunkUploaded;
+                // -----------------------------------------
+                // Overall uploaded bytes
+                // -----------------------------------------
 
-                /*
-                 * Confirmed previous chunks
-                 * +
-                 * current chunk progress
-                 */
                 const uploadedBytes = confirmedBytes + currentChunkUploaded;
 
-                // Overall percentage
+                // -----------------------------------------
+                // Overall progress
+                // -----------------------------------------
+
                 const progress = (uploadedBytes / file.size) * 100;
 
                 // -----------------------------------------
-                // Speed
+                // Rolling speed
                 // -----------------------------------------
 
-                const now = performance.now();
+                const currentTime = performance.now();
+
                 const tracker = speedTrackers[file.name];
 
                 if (!tracker) {
                   return;
                 }
 
-                const bytesUploaded = uploadedBytes - tracker.bytes;
-                const timeElapsed = (now - tracker.time) / 1000;
+                tracker.samples.push({
+                  bytes: uploadedBytes,
+
+                  time: currentTime,
+                });
+
+                // Keep only the last 3 seconds
+                const windowStart = currentTime - 3000;
+
+                tracker.samples = tracker.samples.filter(
+                  (sample) => sample.time >= windowStart,
+                );
+
                 let speed = 0;
 
-                if (timeElapsed > 0) {
-                  speed = bytesUploaded / timeElapsed;
+                if (tracker.samples.length >= 2) {
+                  const oldest = tracker.samples[0];
+
+                  const newest = tracker.samples[tracker.samples.length - 1];
+
+                  const bytesDifference = newest.bytes - oldest.bytes;
+
+                  const timeDifference = (newest.time - oldest.time) / 1000;
+
+                  if (timeDifference > 0) {
+                    speed = bytesDifference / timeDifference;
+                  }
                 }
 
                 // -----------------------------------------
                 // ETA
                 // -----------------------------------------
 
-                const remainingBytes = file.size - uploadedBytes;
+                const remainingBytes = Math.max(0, file.size - uploadedBytes);
+
                 const eta = speed > 0 ? remainingBytes / speed : 0;
 
                 // -----------------------------------------
-                // Update tracker
-                // -----------------------------------------
-
-                tracker.bytes = uploadedBytes;
-                tracker.time = now;
-
-                // -----------------------------------------
-                // Update React state
+                // Update state
                 // -----------------------------------------
 
                 setUploads((current) => ({
@@ -266,9 +336,11 @@ export const useFileUpload = () => {
                     ...current[file.name],
 
                     uploadedBytes,
+
                     progress,
 
                     speed,
+
                     eta,
                   },
                 }));
@@ -278,11 +350,15 @@ export const useFileUpload = () => {
           // Maximum retries
           3,
 
-          // Initial retry delay
+          // Initial delay
           1000,
 
           // Retry callback
           ({ retryNumber, maxRetries }) => {
+            if (controller.signal.aborted) {
+              return;
+            }
+
             setUploads((current) => ({
               ...current,
 
@@ -293,7 +369,9 @@ export const useFileUpload = () => {
 
                 retry: {
                   chunkIndex,
+
                   retryNumber,
+
                   maxRetries,
                 },
               },
@@ -301,15 +379,32 @@ export const useFileUpload = () => {
           },
         );
 
-        // ---------------------------------------------------
-        // 7. Chunk successfully completed
-        // ---------------------------------------------------
+        // -----------------------------------------------
+        // Check pause after request
+        // -----------------------------------------------
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        // -----------------------------------------------
+        // Chunk successfully uploaded
+        // -----------------------------------------------
 
         confirmedBytes += chunks[chunkIndex].size;
 
-        // ---------------------------------------------------
-        // 8. Update state
-        // ---------------------------------------------------
+        // Add confirmed byte position to
+        // speed tracker as a new sample.
+        const currentTime = performance.now();
+
+        const tracker = speedTrackers[file.name];
+
+        if (tracker) {
+          tracker.samples.push({
+            bytes: confirmedBytes,
+            time: currentTime,
+          });
+        }
 
         setUploads((current) => ({
           ...current,
@@ -318,28 +413,39 @@ export const useFileUpload = () => {
             ...current[file.name],
 
             uploadedBytes: confirmedBytes,
+
             progress: (confirmedBytes / file.size) * 100,
-            status: "uploading",
+
+            status: UPLOAD_STATUS.UPLOADING,
+
             retry: null,
           },
         }));
       }
 
-      // -----------------------------------------------------
-      // 9. Ask backend to verify + merge
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 7. Don't complete after pause
+      // ---------------------------------------------------
+
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      // ---------------------------------------------------
+      // 8. Complete upload
+      // ---------------------------------------------------
 
       const result = await completeUpload(upload.uploadID);
 
-      // -----------------------------------------------------
-      // 10. Remove persistent upload information
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 9. Remove stored upload metadata
+      // ---------------------------------------------------
 
       removeStoredUpload(upload.uploadID);
 
-      // -----------------------------------------------------
-      // 11. Mark upload completed
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 10. Mark as completed
+      // ---------------------------------------------------
 
       setUploads((current) => ({
         ...current,
@@ -348,26 +454,66 @@ export const useFileUpload = () => {
           ...current[file.name],
 
           progress: 100,
+
           uploadedBytes: file.size,
+
           status: UPLOAD_STATUS.COMPLETED,
+
           speed: 0,
+
           eta: 0,
+
           retry: null,
+
           result,
         },
       }));
 
-      // -----------------------------------------------------
-      // 12. Cleanup speed tracker
-      // -----------------------------------------------------
+      // ---------------------------------------------------
+      // 11. Cleanup trackers
+      // ---------------------------------------------------
 
       delete speedTrackers[file.name];
-    } catch (error) {
-      console.error("Upload failed:", error);
 
-      // -----------------------------------------------------
-      // Mark upload as failed
-      // -----------------------------------------------------
+      if (uploadControllers[file.name] === controller) {
+        delete uploadControllers[file.name];
+      }
+    } catch (error) {
+      // ---------------------------------------------------
+      // Intentional pause
+      // ---------------------------------------------------
+
+      if (
+        error.code === "ERR_CANCELED" ||
+        error.name === "CanceledError" ||
+        controller.signal.aborted
+      ) {
+        setUploads((current) => ({
+          ...current,
+
+          [file.name]: {
+            ...current[file.name],
+
+            status: UPLOAD_STATUS.PAUSED,
+
+            speed: 0,
+
+            eta: 0,
+
+            retry: null,
+          },
+        }));
+
+        delete speedTrackers[file.name];
+
+        return;
+      }
+
+      // ---------------------------------------------------
+      // Real failure
+      // ---------------------------------------------------
+
+      console.error("Upload failed:", error);
 
       setUploads((current) => ({
         ...current,
@@ -376,47 +522,36 @@ export const useFileUpload = () => {
           ...current[file.name],
 
           status: UPLOAD_STATUS.FAILED,
+
           error,
+
           retry: null,
+
           speed: 0,
+
           eta: 0,
         },
       }));
 
-      // -----------------------------------------------------
-      // Cleanup tracker
-      // -----------------------------------------------------
-
       delete speedTrackers[file.name];
 
-      /*
-       * IMPORTANT:
-       *
-       * We rethrow the error.
-       *
-       * The UploadQueue needs to know that the task
-       * finished with an error.
-       */
+      // Important:
+      // tell the queue the task failed.
       throw error;
     }
   };
 
-  /*
-   * ---------------------------------------------------------
-   * QUEUE ENTRY POINT
-   * ---------------------------------------------------------
-   *
-   * This function DOES NOT upload anything itself.
-   *
-   * It simply adds the upload task to the queue.
-   */
+  // -------------------------------------------------------
+  // QUEUE ENTRY POINT
+  // -------------------------------------------------------
+
   const startUpload = (file, existingUploadID) => {
-    /*
-     * Immediately show the file as pending.
-     *
-     * The queue may not start it immediately if all
-     * concurrent upload slots are occupied.
-     */
+    // Each upload gets its own controller.
+    const controller = new AbortController();
+
+    uploadControllers[file.name] = controller;
+
+    // Immediately show pending.
     setUploads((current) => ({
       ...current,
 
@@ -424,27 +559,68 @@ export const useFileUpload = () => {
         ...current[file.name],
 
         file,
+
         uploadID: existingUploadID ?? current[file.name]?.uploadID ?? null,
+
         uploadedBytes: current[file.name]?.uploadedBytes ?? 0,
+
         progress: current[file.name]?.progress ?? 0,
+
         speed: 0,
+
         eta: 0,
+
         status: UPLOAD_STATUS.PENDING,
+
         retry: null,
+
         error: null,
       },
     }));
 
-    /*
-     * Add actual upload work to queue.
-     *
-     * Queue decides WHEN performUpload runs.
-     */
-    uploadQueue.add(() => performUpload(file, existingUploadID));
+    // Add upload to queue.
+    uploadQueue.add(() => performUpload(file, existingUploadID, controller));
   };
+
+  // -------------------------------------------------------
+  // PAUSE
+  // -------------------------------------------------------
+
+  const pauseUpload = (fileName) => {
+    const controller = uploadControllers[fileName];
+
+    if (!controller) {
+      return;
+    }
+
+    // Update UI immediately.
+    setUploads((current) => ({
+      ...current,
+
+      [fileName]: {
+        ...current[fileName],
+
+        status: UPLOAD_STATUS.PAUSED,
+
+        speed: 0,
+
+        eta: 0,
+
+        retry: null,
+      },
+    }));
+
+    // Abort current HTTP request.
+    controller.abort();
+  };
+
+  // -------------------------------------------------------
+  // Return hook API
+  // -------------------------------------------------------
 
   return {
     uploads,
     startUpload,
+    pauseUpload,
   };
 };

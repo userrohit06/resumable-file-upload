@@ -5,7 +5,7 @@ import { useFileUpload } from "./hooks/useFileUpload";
 import UploadActivity from "./components/upload/UploadActivity";
 
 const App = () => {
-  const { uploads, startUpload } = useFileUpload();
+  const { uploads, startUpload, pauseUpload } = useFileUpload();
 
   const [files, setFiles] = useState([]);
 
@@ -60,6 +60,7 @@ const App = () => {
                 file={file}
                 upload={uploads[file.name]}
                 onStart={startUpload}
+                onPause={pauseUpload}
               />
             ))}
           </section>

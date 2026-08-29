@@ -5,4 +5,5 @@ export const UPLOAD_STATUS = {
   COMPLETED: "completed",
   FAILED: "failed",
   WAITING: "waiting",
+  PAUSED: "paused",
 };
