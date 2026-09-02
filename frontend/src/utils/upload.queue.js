@@ -5,20 +5,30 @@ export class UploadQueue {
     this.activeCount = 0;
   }
 
-  add(task) {
-    this.queue.push(task);
+  add(id, task) {
+    this.queue.push({ id, task });
 
     // Try to start the task immediately
     this.process();
   }
 
+  remove(id) {
+    const index = this.queue.findIndex((item) => item.id === id);
+
+    if (index === -1) return false;
+
+    this.queue.splice(index, 1);
+
+    return true;
+  }
+
   async process() {
     while (this.queue.length > 0 && this.activeCount < this.maxConcurrent) {
-      const task = this.queue.shift();
+      const item = this.queue.shift();
       this.activeCount++;
 
       try {
-        await task();
+        await item.task();
       } finally {
         this.activeCount--;
 

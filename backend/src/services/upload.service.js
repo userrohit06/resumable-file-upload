@@ -4,6 +4,7 @@ import path from "path";
 
 import { getChunkDirectory } from "../utils/file.utils.js";
 import { Upload } from "../models/Upload.js";
+import { UPLOAD_STATUS } from "../constants/uploadStatus.js";
 
 export const createUpload = async ({ fileName, fileSize, totalChunks }) => {
   const uploadID = crypto.randomUUID();
@@ -14,7 +15,7 @@ export const createUpload = async ({ fileName, fileSize, totalChunks }) => {
     fileSize,
     totalChunks,
     uploadedChunks: [],
-    status: "pending",
+    status: UPLOAD_STATUS.PENDING,
   });
 
   return upload;
@@ -75,7 +76,7 @@ export const markChunkUploaded = async (uploadID, chunkIndex) => {
       },
 
       $set: {
-        status: "uploading",
+        status: UPLOAD_STATUS.UPLOADING,
       },
     },
     {
@@ -182,7 +183,7 @@ export const markUploadCompleted = async (uploadID) => {
     },
     {
       $set: {
-        status: "completed",
+        status: UPLOAD_STATUS.COMPLETED,
       },
     },
     {
@@ -193,6 +194,70 @@ export const markUploadCompleted = async (uploadID) => {
   if (!upload) {
     throw new Error("Upload session not found");
   }
+
+  return upload;
+};
+
+export const deleteUpload = async (uploadID) => {
+  const result = await Upload.findOneAndDelete({ uploadID });
+  return result;
+};
+
+export const getUploads = async ({ page, limit, status, search }) => {
+  const skip = (page - 1) * limit;
+
+  const filter = {};
+
+  // filter by status
+  if (status) filter.status = status;
+
+  // search by filename
+  if (search) {
+    filter.fileName = {
+      $regex: search,
+      $options: "i",
+    };
+  }
+
+  const [uploads, totalItems] = await Promise.all([
+    Upload.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Upload.countDocuments(filter),
+  ]);
+
+  return {
+    uploads,
+    totalItems,
+  };
+};
+
+export const pauseUpload = async (uploadID) => {
+  const upload = await Upload.findOneAndUpdate(
+    { uploadID },
+    {
+      $set: {
+        status: UPLOAD_STATUS.PAUSED,
+      },
+    },
+    { new: true },
+  );
+
+  if (!upload) throw new Error("Upload session not found");
+
+  return upload;
+};
+
+export const resumeUpload = async (uploadID) => {
+  const upload = await Upload.findOneAndUpdate(
+    { uploadID, status: UPLOAD_STATUS.PENDING },
+    {
+      $set: {
+        status: UPLOAD_STATUS.UPLOADING,
+      },
+    },
+    { new: true },
+  );
+
+  if (!upload) throw new Error("Paused upload session not found");
 
   return upload;
 };

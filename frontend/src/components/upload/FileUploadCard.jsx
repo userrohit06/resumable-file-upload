@@ -2,7 +2,14 @@ import React from "react";
 
 import { UPLOAD_STATUS } from "../../constants/uploadStatus";
 
-const FileUploadCard = ({ file, upload, onStart, onPause }) => {
+const FileUploadCard = ({
+  file,
+  upload,
+  onStart,
+  onPause,
+  onCancel,
+  onResume,
+}) => {
   const sizeInMB = (file.size / (1024 * 1024)).toFixed(2);
 
   const progress = upload?.progress ?? 0;
@@ -11,7 +18,9 @@ const FileUploadCard = ({ file, upload, onStart, onPause }) => {
   const eta = upload?.eta ?? 0;
 
   const formatBytes = (bytes) => {
-    if (bytes === 0) return "0 B";
+    if (bytes === 0) {
+      return "0 B";
+    }
 
     const units = ["B", "KB", "MB", "GB", "TB"];
 
@@ -56,8 +65,66 @@ const FileUploadCard = ({ file, upload, onStart, onPause }) => {
     return `${hours}h ${remainingMinutes}m`;
   };
 
+  const getStatusClass = () => {
+    if (!upload?.status) {
+      return "";
+    }
+
+    switch (upload.status) {
+      case UPLOAD_STATUS.COMPLETED:
+        return "file-status-success";
+
+      case UPLOAD_STATUS.RETRYING:
+        return "file-status-retrying";
+
+      case UPLOAD_STATUS.PAUSED:
+        return "file-status-paused";
+
+      case UPLOAD_STATUS.FAILED:
+        return "file-status-failed";
+
+      default:
+        return "";
+    }
+  };
+
+  const getStatusText = () => {
+    if (!upload?.status) {
+      return UPLOAD_STATUS.WAITING;
+    }
+
+    switch (upload.status) {
+      case UPLOAD_STATUS.RETRYING:
+        return upload.retry
+          ? `Retrying chunk ${upload.retry.chunkIndex + 1}...`
+          : "Retrying...";
+
+      case UPLOAD_STATUS.PENDING:
+        return "Waiting in queue...";
+
+      case UPLOAD_STATUS.PAUSED:
+        return "Paused";
+
+      case UPLOAD_STATUS.FAILED:
+        return "Upload failed";
+
+      case UPLOAD_STATUS.UPLOADING:
+        return "Uploading";
+
+      case UPLOAD_STATUS.COMPLETED:
+        return "Completed";
+
+      default:
+        return upload.status;
+    }
+  };
+
   return (
     <article className="file-card">
+      {/* ------------------------------------------------ */}
+      {/* HEADER */}
+      {/* ------------------------------------------------ */}
+
       <div className="file-card-header">
         <div className="file-info">
           <div className="file-icon">↑</div>
@@ -69,37 +136,21 @@ const FileUploadCard = ({ file, upload, onStart, onPause }) => {
           </div>
         </div>
 
-        <span
-          className={`file-status ${
-            upload?.status === UPLOAD_STATUS.COMPLETED
-              ? "file-status-success"
-              : upload?.status === UPLOAD_STATUS.RETRYING
-                ? "file-status-retrying"
-                : upload?.status === UPLOAD_STATUS.PAUSED
-                  ? "file-status-paused"
-                  : upload?.status === UPLOAD_STATUS.FAILED
-                    ? "file-status-failed"
-                    : ""
-          }`}
-        >
-          {upload?.status === UPLOAD_STATUS.RETRYING
-            ? `Retrying chunk ${upload.retry?.chunkIndex + 1}...`
-            : upload?.status === UPLOAD_STATUS.PENDING
-              ? "Waiting in queue..."
-              : upload?.status === UPLOAD_STATUS.PAUSED
-                ? "Paused"
-                : upload?.status === UPLOAD_STATUS.FAILED
-                  ? "Upload failed"
-                  : (upload?.status ?? UPLOAD_STATUS.WAITING)}
+        <span className={`file-status ${getStatusClass()}`}>
+          {getStatusText()}
         </span>
       </div>
+
+      {/* ------------------------------------------------ */}
+      {/* PROGRESS */}
+      {/* ------------------------------------------------ */}
 
       <div className="progress-section">
         <div className="progress-track">
           <div
             className="progress-bar"
             style={{
-              width: `${progress}%`,
+              width: `${Math.min(100, Math.max(0, progress))}%`,
             }}
           />
         </div>
@@ -114,6 +165,10 @@ const FileUploadCard = ({ file, upload, onStart, onPause }) => {
           </span>
         </div>
 
+        {/* ------------------------------------------------ */}
+        {/* SPEED + ETA */}
+        {/* ------------------------------------------------ */}
+
         {upload?.status === UPLOAD_STATUS.UPLOADING && (
           <div className="upload-stats">
             <span>↑ {formatSpeed(speed)}</span>
@@ -123,48 +178,106 @@ const FileUploadCard = ({ file, upload, onStart, onPause }) => {
         )}
       </div>
 
-      {/* WAITING IN QUEUE */}
-      {upload?.status === UPLOAD_STATUS.PENDING && (
-        <button className="start-upload-button" disabled>
-          Waiting...
-        </button>
-      )}
+      {/* ------------------------------------------------ */}
+      {/* PENDING */}
+      {/* ------------------------------------------------ */}
 
-      {/* CURRENTLY UPLOADING */}
-      {upload?.status === UPLOAD_STATUS.UPLOADING && (
+      {upload?.status === UPLOAD_STATUS.PENDING && (
         <button
           className="start-upload-button pause-button"
           onClick={() => onPause(file.name)}
+          style={{
+            marginTop: "18px",
+          }}
         >
           Pause
         </button>
       )}
 
-      {/* AUTOMATIC RETRY */}
+      {/* ------------------------------------------------ */}
+      {/* UPLOADING */}
+      {/* ------------------------------------------------ */}
+
+      {upload?.status === UPLOAD_STATUS.UPLOADING && (
+        <div className="upload-actions">
+          <button
+            className="start-upload-button pause-button"
+            onClick={() => onPause(file.name)}
+          >
+            Pause
+          </button>
+
+          <button
+            className="cancel-upload-button"
+            onClick={() => onCancel(file.name)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ------------------------------------------------ */}
+      {/* RETRYING */}
+      {/* ------------------------------------------------ */}
+
       {upload?.status === UPLOAD_STATUS.RETRYING && (
         <button className="start-upload-button" disabled>
           Retrying...
         </button>
       )}
 
+      {/* ------------------------------------------------ */}
       {/* PAUSED */}
+      {/* ------------------------------------------------ */}
+
       {upload?.status === UPLOAD_STATUS.PAUSED && (
-        <button
-          className="start-upload-button resume-button"
-          onClick={() => onStart(file, upload.uploadID)}
-        >
-          Resume
-        </button>
+        <div className="upload-actions">
+          <button
+            className="start-upload-button resume-button"
+            onClick={() => onResume(file)}
+          >
+            Resume
+          </button>
+
+          <button
+            className="cancel-upload-button"
+            onClick={() => onCancel(file.name)}
+          >
+            Cancel
+          </button>
+        </div>
       )}
 
-      {/* FAILED AFTER ALL RETRIES */}
+      {/* ------------------------------------------------ */}
+      {/* FAILED */}
+      {/* ------------------------------------------------ */}
+
       {upload?.status === UPLOAD_STATUS.FAILED && (
-        <button
-          className="start-upload-button retry-button"
-          onClick={() => onStart(file, upload.uploadID)}
-        >
-          Retry upload
-        </button>
+        <div className="upload-actions">
+          <button
+            className="start-upload-button retry-button"
+            onClick={() => onStart(file, upload.uploadID)}
+          >
+            Retry upload
+          </button>
+
+          <button
+            className="cancel-upload-button"
+            onClick={() => onCancel(file.name)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ------------------------------------------------ */}
+      {/* COMPLETED */}
+      {/* ------------------------------------------------ */}
+
+      {upload?.status === UPLOAD_STATUS.COMPLETED && (
+        <div className="upload-complete-message">
+          ✓ Upload completed successfully
+        </div>
       )}
     </article>
   );

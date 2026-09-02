@@ -5,7 +5,14 @@ import { useFileUpload } from "./hooks/useFileUpload";
 import UploadActivity from "./components/upload/UploadActivity";
 
 const App = () => {
-  const { uploads, startUpload, pauseUpload } = useFileUpload();
+  const {
+    uploads,
+    startUpload,
+    pauseUpload,
+    cancelUploadFile,
+    resumeUploadFile,
+    startUploads,
+  } = useFileUpload();
 
   const [files, setFiles] = useState([]);
 
@@ -23,7 +30,15 @@ const App = () => {
 
     setFiles((currentFiles) => [...currentFiles, ...newFiles]);
 
-    newFiles.forEach((file) => startUpload(file));
+    startUploads(newFiles);
+  };
+
+  const handleCancelUpload = async (fileName) => {
+    await cancelUploadFile(fileName);
+
+    setFiles((currentFiles) =>
+      currentFiles.filter((file) => file.name !== fileName),
+    );
   };
 
   return (
@@ -61,6 +76,8 @@ const App = () => {
                 upload={uploads[file.name]}
                 onStart={startUpload}
                 onPause={pauseUpload}
+                onCancel={handleCancelUpload}
+                onResume={resumeUploadFile}
               />
             ))}
           </section>
