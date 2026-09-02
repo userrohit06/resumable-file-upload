@@ -41,3 +41,36 @@ export const getUploadStatus = async (uploadID) => {
   const response = await api.get(`/${uploadID}/status`);
   return response.data;
 };
+
+export const cancelUpload = async (uploadID) => {
+  const response = await api.delete(`/${uploadID}/cancel`);
+  return response.data;
+};
+
+export const pauseUpload = async (uploadID) => {
+  const response = await api.post(`/${uploadID}/pause`);
+  return response.data;
+};
+
+export const resumeUpload = async (uploadID) => {
+  const response = await api.post(`/${uploadID}/resume`);
+  return response.data;
+};
+
+export const getUploads = async ({
+  page = 1,
+  pageSize = 20,
+  status,
+  search,
+}) => {
+  const response = await api.get("/", {
+    params: {
+      page,
+      limit,
+      ...(status ? { status } : {}),
+      ...(search?.trim() ? { search: search?.trim() } : {}),
+    },
+  });
+
+  return response.data;
+};
