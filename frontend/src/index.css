@@ -271,7 +271,6 @@ h1 span {
 }
 
 .start-upload-button {
-  margin-top: 18px;
   padding: 10px 16px;
   border: 0;
   border-radius: 10px;
@@ -368,4 +367,24 @@ h1 span {
 .upload-activity-content span {
   font-size: 12px;
   color: #9ca3af;
+}
+
+.upload-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.cancel-upload-button {
+  padding: 10px 16px;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  background: transparent;
+  color: #ef4444;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cancel-upload-button:hover {
+  background: rgba(239, 68, 68, 0.1);
 }
